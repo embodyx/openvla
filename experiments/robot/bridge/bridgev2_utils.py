@@ -27,17 +27,17 @@ except ImportError:
     print("Warning: ROS 2 not available, using mock implementations")
 
 # Add bridge_data_robot to path FIRST
-bridge_data_path = "/mnt/nvme/cyberlimb-bridge/bridge_data_robot"
+bridge_data_path = "/home/nick/CyberLimb/bridge_data_robot"
 if bridge_data_path not in sys.path:
     sys.path.insert(0, bridge_data_path)
 
 # Add widowx_controller source path
-widowx_controller_path = "/mnt/nvme/cyberlimb-bridge/bridge_data_robot/widowx_envs/widowx_controller/src"
+widowx_controller_path = "/home/nick/CyberLimb/bridge_data_robot/widowx_envs/widowx_controller/src"
 if widowx_controller_path not in sys.path:
     sys.path.insert(0, widowx_controller_path)
 
 # Add widowx_envs path
-widowx_envs_path = "/mnt/nvme/cyberlimb-bridge/bridge_data_robot/widowx_envs"
+widowx_envs_path = "/home/nick/CyberLimb/bridge_data_robot/widowx_envs"
 if widowx_envs_path not in sys.path:
     sys.path.insert(0, widowx_envs_path)
 
@@ -74,7 +74,7 @@ def get_ros2_node():
 # Setup interbotix compatibility FIRST
 try:
     # Add interbotix to path if not already there
-    interbotix_path = "/home/jake/interbotix_ws/install/interbotix_xs_modules/lib/python3.10/site-packages"
+    interbotix_path = "/home/nick/interbotix_ws/install/interbotix_xs_modules/lib/python3.10/site-packages"
     if interbotix_path not in sys.path:
         sys.path.insert(0, interbotix_path)
         
@@ -483,6 +483,7 @@ import imageio
 import tensorflow as tf
 import torch
 from widowx_envs.widowx_env_service import WidowXConfigs
+# from widowx_envs.widowx_env_service import WidowXConfigs
 
 sys.path.append(".")
 
