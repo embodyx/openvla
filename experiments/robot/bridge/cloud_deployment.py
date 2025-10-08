@@ -153,8 +153,6 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                     # Get preprocessed image
                     obs["full_image"] = get_preprocessed_image(obs, resize_size)
                     
-                    cv2.imshow("Image", obs["full_image"])
-
                     # Start episode timer right before first inference
                     if episode_start_time is None:
                         episode_start_time = time.time()
