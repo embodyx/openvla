@@ -840,9 +840,14 @@ def libero_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][:, -2:]  # 2D gripper state
     return trajectory
 
+def pick_eggplant_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    trajectory["observation"]["EEF_state"] = trajectory["observation"]["state"][:, :6]
+    trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][:, -1]
+    return trajectory
 
 # === Registry ===
 OXE_STANDARDIZATION_TRANSFORMS = {
+    "pick_eggplant": pick_eggplant_dataset_transform,
     "bridge_oxe": bridge_oxe_dataset_transform,
     "bridge_orig": bridge_orig_dataset_transform,
     "bridge_dataset": bridge_orig_dataset_transform,
