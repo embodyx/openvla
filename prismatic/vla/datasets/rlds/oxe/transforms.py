@@ -841,8 +841,6 @@ def libero_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     return trajectory
 
 def pick_eggplant_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
-    trajectory["observation"]["EEF_state"] = trajectory["observation"]["state"][:, :6]
-    trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][:, -1]
     return trajectory
 
 # === Registry ===
