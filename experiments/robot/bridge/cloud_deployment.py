@@ -19,6 +19,8 @@ import requests
 
 import draccus
 
+import matplotlib.pyplot as plt
+
 # Append current directory so that interpreter can find experiments.robot
 sys.path.append(".")
 from experiments.robot.bridge.bridgev2_utils import (
@@ -29,10 +31,8 @@ from experiments.robot.bridge.bridgev2_utils import (
     save_rollout_data,
     save_rollout_video,
 )
-from experiments.robot.openvla_utils import get_processor
 from experiments.robot.robot_utils import (
     get_image_resize_size,
-    get_model,
 )
 
 
@@ -75,32 +75,73 @@ class GenerateConfig:
     #################################################################################################################
     # Utils
     #################################################################################################################
-    save_data: bool = False                                     # Whether to save rollout data (images, actions, etc.)
+    save_data: bool = True                                     # Whether to save rollout data (images, actions, etc.)
 
     # fmt: on
 
     # Cloud configuration
     # Set your cloud endpoint here
-    CLOUD_URL = "http://35.230.73.70:8765/predict"  # or https://... if behind TLS
+    CLOUD_URL = "http://34.182.0.24:8765/predict"  # or https://... if behind TLS
 
-def send_to_cloud_and_get_response(color_image: np.array, cfg):
-    # Encode the image as JPEG
-    ok, buf = cv2.imencode(".jpg", color_image, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-    if not ok:
-        raise RuntimeError("JPEG encode failed")
-    jpeg_bytes = buf.tobytes()
-    # POST raw JPEG
-    r = requests.post(cfg.CLOUD_URL, data=jpeg_bytes, headers={"Content-Type": "image/jpeg"}, timeout=5)
+def send_to_cloud_and_get_response(obs, task_label, cfg):
+    # if obs["full_image"] is not None:
+    #     main_image = obs["full_image"]
+    #     # Encode the image as JPEG
+    #     ok, buf = cv2.imencode(".jpg", main_image, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    #     if not ok:
+    #         raise RuntimeError("JPEG encode failed")
+    #     main_image_jpeg_bytes = buf.tobytes()
+    # if obs["wrist_image"] is not None:
+    #     wrist_image = obs["full_image"]
+    #     # Encode the image as JPEG
+    #     ok, buf = cv2.imencode(".jpg", wrist_image, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    #     if not ok:
+    #         raise RuntimeError("JPEG encode failed")
+    #     wrist_image_jpeg_bytes = buf.tobytes()
+    # # POST raw JPEG
+    # r = requests.post(cfg.CLOUD_URL, data=main_image_jpeg_bytes, headers={"Content-Type": "image/jpeg"}, timeout=5)
+    # r.raise_for_status()
+    # return r.json()
+
+    files = {}
+    headers = {
+        "X-Prompt": getattr(cfg, "prompt", task_label),
+        "Content-Type": None  # let requests set proper multipart content-type
+    }
+
+    if obs.get("full_image") is not None:
+        ok, buf = cv2.imencode(".jpg", obs["full_image"], [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ok:
+            raise RuntimeError("JPEG encode failed (full_image)")
+        files["main"] = ("main.jpg", buf.tobytes(), "image/jpeg")
+
+    if obs.get("wrist_image") is not None:
+        ok, buf = cv2.imencode(".jpg", obs["wrist_image"], [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ok:
+            raise RuntimeError("JPEG encode failed (wrist_image)")
+        files["wrist"] = ("wrist.jpg", buf.tobytes(), "image/jpeg")
+
+    # optional: add proprio
+    if getattr(cfg, "proprio", None) is not None:
+        headers["X-Proprio"] = ",".join(map(str, cfg.proprio))
+
+    print(headers)
+    print(files)
+
+    r = requests.post(cfg.CLOUD_URL, files=files, headers=headers, timeout=15)
     r.raise_for_status()
     return r.json()
+
 
 @draccus.wrap()
 def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
     assert cfg.pretrained_checkpoint is not None, "cfg.pretrained_checkpoint must not be None!"
     assert not cfg.center_crop, "`center_crop` should be disabled for Bridge evaluations!"
 
-    # [OpenVLA] Set action un-normalization key
-    cfg.unnorm_key = "bridge_orig"
+    # Initialize the wrist cam
+    wrist_cam = "/dev/v4l/by-id/usb-SONix_Technology_Co.__Ltd._Streaming_Camera_SN0001-video-index0"
+    cap = cv2.VideoCapture(wrist_cam, cv2.CAP_V4L2)
+
 
     # Initialize the WidowX environment
     env = get_widowx_env(cfg)
@@ -129,6 +170,7 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
         episode_start_time = None  # Timer for episode elapsed time from first inference
         if cfg.save_data:
             rollout_images = []
+            rollout_wrist_images = []
             rollout_states = []
             rollout_actions = []
 
@@ -147,11 +189,32 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                     # Refresh the camera image and proprioceptive state
                     obs = refresh_obs(obs, env)
 
+                    # Also get the wrist camera image
+                    if cap is not None:
+                        ok, bgr = cap.read()
+                        cap.release()
+                        if not ok or bgr is None:
+                            raise RuntimeError("capture failed")
+                        # Convert to rgb
+                        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                    
+                        # Add the wrist camera to the observation
+                        obs['wrist_image'] = rgb
+
                     # Save full (not preprocessed) image for replay video
                     replay_images.append(obs["full_image"])
 
                     # Get preprocessed image
-                    obs["full_image"] = get_preprocessed_image(obs, resize_size)
+                    obs = get_preprocessed_image(obs, resize_size)
+                    if obs["full_image"] is not None:
+                        preprocessed_main_image = obs["full_image"]
+                    if obs["wrist_image"] is not None:
+                        preprocessed_wrist_image = obs["wrist_image"]
+
+                    if cfg.save_data:
+                        rollout_images.append(preprocessed_main_image)
+                        rollout_wrist_images.append(preprocessed_wrist_image)
+                        rollout_states.append(obs['proprio'])
                     
                     # Start episode timer right before first inference
                     if episode_start_time is None:
@@ -159,8 +222,11 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                         print("Starting episode timer for inference tracking...")
 
                     # Send to cloud for inference
-                    resp = send_to_cloud_and_get_response(obs["full_image"], cfg)
+                    resp = send_to_cloud_and_get_response(obs, task_label, cfg)
                     action = np.array(resp['action'])
+
+                    if cfg.save_data:
+                        rollout_actions.append(action.tolist())
 
                     # Execute action
                     print("action:", action.tolist())
