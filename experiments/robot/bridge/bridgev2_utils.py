@@ -549,11 +549,14 @@ def get_next_task_label(task_label):
     return task_label
 
 
-def save_rollout_video(rollout_images, idx):
+def save_rollout_video(rollout_images, rollout_images_wrist, idx):
     """Saves an MP4 replay of an episode."""
     os.makedirs("./rollouts", exist_ok=True)
-    mp4_path = f"./rollouts/rollout-{DATE_TIME}-{idx+1}.mp4"
-    video_writer = imageio.get_writer(mp4_path, fps=5)
+    mp4_path_main = f"./rollouts/rollout-main-{DATE_TIME}-{idx+1}.mp4"
+    video_writer = imageio.get_writer(mp4_path_main, fps=5)
+
+    mp4_path_wrist = f"./rollouts/rollout-wrist-{DATE_TIME}-{idx+1}.mp4"
+    video_writer_wrist = imageio.get_writer(mp4_path_wrist, fps=5)
     
     for img in rollout_images:
         # Ensure img is a numpy array
@@ -585,9 +588,41 @@ def save_rollout_video(rollout_images, idx):
             img = np.repeat(img, 3, axis=2)
         
         video_writer.append_data(img)
+
+    for img in rollout_images_wrist:
+        # Ensure img is a numpy array
+        if not isinstance(img, np.ndarray):
+            img = np.array(img)
+        
+        # Handle different image shapes
+        if len(img.shape) == 4:
+            # Remove batch dimension if present
+            img = img[0]
+        elif len(img.shape) == 2:
+            # Convert grayscale to RGB
+            img = np.stack([img, img, img], axis=-1)
+        
+        # Ensure image is 3D (H, W, C) with 3 channels
+        if len(img.shape) != 3 or img.shape[2] not in [1, 3, 4]:
+            print(f"Warning: Skipping image with invalid shape {img.shape}")
+            continue
+        
+        # Ensure image is uint8
+        if img.dtype != np.uint8:
+            if img.max() <= 1.0:
+                img = (img * 255).astype(np.uint8)
+            else:
+                img = img.astype(np.uint8)
+        
+        # Convert single channel to RGB if needed
+        if img.shape[2] == 1:
+            img = np.repeat(img, 3, axis=2)
+        
+        video_writer_wrist.append_data(img)
     
     video_writer.close()
-    print(f"Saved rollout MP4 at path {mp4_path}")
+    video_writer_wrist.close()
+    print(f"Saved rollout MP4 at path {mp4_path_main} and {mp4_path_wrist}")
 
 
 def save_rollout_data(rollout_orig_images, rollout_images, rollout_states, rollout_actions, idx):
@@ -660,8 +695,11 @@ def get_preprocessed_image(obs, resize_size):
     assert isinstance(resize_size, int) or isinstance(resize_size, tuple)
     if isinstance(resize_size, int):
         resize_size = (resize_size, resize_size)
-    obs["full_image"] = resize_image(obs["full_image"], resize_size)
-    return obs["full_image"]
+    if obs["full_image"] is not None:
+        obs["full_image"] = resize_image(obs["full_image"], resize_size)
+    if obs["wrist_image"] is not None:
+        obs["wrist_image"] = resize_image(obs["wrist_image"], resize_size)
+    return obs
 
 
 def refresh_obs(obs, env):
