@@ -19,8 +19,6 @@ import requests
 
 import draccus
 
-import matplotlib.pyplot as plt
-
 # Append current directory so that interpreter can find experiments.robot
 sys.path.append(".")
 from experiments.robot.bridge.bridgev2_utils import (
@@ -69,7 +67,7 @@ class GenerateConfig:
 
     blocking: bool = False                                      # Whether to use blocking control
     max_episodes: int = 50                                      # Max number of episodes to run
-    max_steps: int = 80                                         # Max number of timesteps per episode
+    max_steps: int = 240                                         # Max number of timesteps per episode
     control_frequency: float = 0.5                               # WidowX control frequency (much slower for smooth motion)
 
     #################################################################################################################
@@ -81,7 +79,7 @@ class GenerateConfig:
 
     # Cloud configuration
     # Set your cloud endpoint here
-    CLOUD_URL = "http://34.182.0.24:8765/predict"  # or https://... if behind TLS
+    CLOUD_URL = "http://34.82.215.196:8765/predict"  # or https://... if behind TLS
 
 def send_to_cloud_and_get_response(obs, task_label, cfg):
     # if obs["full_image"] is not None:
@@ -125,9 +123,6 @@ def send_to_cloud_and_get_response(obs, task_label, cfg):
     if getattr(cfg, "proprio", None) is not None:
         headers["X-Proprio"] = ",".join(map(str, cfg.proprio))
 
-    print(headers)
-    print(files)
-
     r = requests.post(cfg.CLOUD_URL, files=files, headers=headers, timeout=15)
     r.raise_for_status()
     return r.json()
@@ -139,12 +134,18 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
     assert not cfg.center_crop, "`center_crop` should be disabled for Bridge evaluations!"
 
     # Initialize the wrist cam
-    wrist_cam = "/dev/v4l/by-id/usb-SONix_Technology_Co.__Ltd._Streaming_Camera_SN0001-video-index0"
+    wrist_cam = "/dev/v4l/by-id/usb-SONix_Technology_Co.__Ltd._Streaming_Camera_SN0001-video-index0" 
     cap = cv2.VideoCapture(wrist_cam, cv2.CAP_V4L2)
-
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)   # manual
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)  
 
     # Initialize the WidowX environment
     env = get_widowx_env(cfg)
+    print(env)
+
+    print(env._hp)
 
     # Get expected image dimensions
     resize_size = get_image_resize_size(cfg)
@@ -167,6 +168,7 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
         t = 0
         step_duration = 1.0 / cfg.control_frequency
         replay_images = []
+        replay_images_wrist = []
         episode_start_time = None  # Timer for episode elapsed time from first inference
         if cfg.save_data:
             rollout_images = []
@@ -180,6 +182,8 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
         last_tstamp = time.time()
         while t < cfg.max_steps:
             try:
+                
+
                 curr_tstamp = time.time()
                 if curr_tstamp > last_tstamp + step_duration:
                     print(f"t: {t}")
@@ -192,7 +196,7 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                     # Also get the wrist camera image
                     if cap is not None:
                         ok, bgr = cap.read()
-                        cap.release()
+                        # cap.release()
                         if not ok or bgr is None:
                             raise RuntimeError("capture failed")
                         # Convert to rgb
@@ -203,8 +207,9 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
 
                     # Save full (not preprocessed) image for replay video
                     replay_images.append(obs["full_image"])
+                    replay_images_wrist.append(obs["wrist_image"])
 
-                    # Get preprocessed image
+                    # # Get preprocessed image
                     obs = get_preprocessed_image(obs, resize_size)
                     if obs["full_image"] is not None:
                         preprocessed_main_image = obs["full_image"]
@@ -229,6 +234,7 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                         rollout_actions.append(action.tolist())
 
                     # Execute action
+                    action[:6] *= 1
                     print("action:", action.tolist())
                     step_result = env.step(action)
                     if len(step_result) == 4:
@@ -250,7 +256,7 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                 break
 
         # Save a replay video of the episode
-        save_rollout_video(replay_images, episode_idx)
+        save_rollout_video(replay_images, replay_images_wrist, episode_idx)
 
         # [If saving rollout data] Save rollout data
         if cfg.save_data:
